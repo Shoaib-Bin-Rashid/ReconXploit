@@ -1,0 +1,216 @@
+# Database Configuration
+database:
+  host: localhost
+  port: 5432
+  name: reconxploit
+  user: postgres
+  password: changeme
+
+# Redis Configuration
+redis:
+  host: localhost
+  port: 6379
+  db: 0
+  password: null
+
+# Celery Configuration
+celery:
+  broker_url: redis://localhost:6379/0
+  result_backend: redis://localhost:6379/0
+  task_time_limit: 7200  # 2 hours
+  task_soft_time_limit: 6000
+  worker_concurrency: 4
+  worker_prefetch_multiplier: 1
+
+# Scanning Configuration
+scanning:
+  max_concurrent_scans: 3
+  default_timeout: 3600  # 1 hour
+  retry_attempts: 3
+  retry_delay: 300  # 5 minutes
+  
+  # Rate limiting
+  rate_limit:
+    enabled: true
+    requests_per_second: 10
+    burst: 50
+
+# Tool Paths (auto-detected if in PATH)
+tools:
+  subfinder: subfinder
+  assetfinder: assetfinder
+  amass: amass
+  findomain: findomain
+  httpx: httpx
+  gowitness: gowitness
+  naabu: naabu
+  nmap: nmap
+  nuclei: nuclei
+  waybackurls: waybackurls
+  gau: gau
+
+# Wordlist Paths
+wordlists:
+  subdomains: data/wordlists/SecLists/Discovery/DNS/subdomains-top1million-110000.txt
+  parameters: data/wordlists/SecLists/Discovery/Web-Content/burp-parameter-names.txt
+  directories: data/wordlists/SecLists/Discovery/Web-Content/raft-large-directories.txt
+  resolvers: data/wordlists/resolvers.txt
+
+# Notification Settings
+notifications:
+  telegram:
+    enabled: false
+    bot_token: "YOUR_BOT_TOKEN_HERE"
+    chat_id: "YOUR_CHAT_ID_HERE"
+    
+  discord:
+    enabled: false
+    webhook_url: "YOUR_DISCORD_WEBHOOK_URL"
+    
+  slack:
+    enabled: false
+    webhook_url: "YOUR_SLACK_WEBHOOK_URL"
+    
+  email:
+    enabled: false
+    smtp_host: smtp.gmail.com
+    smtp_port: 587
+    smtp_user: your-email@gmail.com
+    smtp_password: your-app-password
+    from_address: your-email@gmail.com
+    to_addresses:
+      - alert@yourdomain.com
+
+# Alert Rules
+alerts:
+  # New subdomain with high risk score
+  new_subdomain_high_risk:
+    enabled: true
+    min_risk_score: 70
+    channels: [telegram, discord]
+    
+  # Critical vulnerability found
+  critical_vulnerability:
+    enabled: true
+    severities: [critical]
+    channels: [telegram, discord, email]
+    
+  # Secrets found in JavaScript
+  secrets_found:
+    enabled: true
+    secret_types: [api_key, aws_key, jwt, password]
+    channels: [telegram]
+    
+  # Subdomain takeover possible
+  subdomain_takeover:
+    enabled: true
+    channels: [telegram, discord, email]
+    
+  # New open port (sensitive services)
+  new_sensitive_port:
+    enabled: true
+    ports: [22, 21, 3306, 5432, 6379, 27017, 9200]
+    channels: [telegram]
+    
+  # Service version downgrade
+  version_downgrade:
+    enabled: true
+    channels: [telegram]
+
+# Risk Scoring Weights
+risk_scoring:
+  vulnerability_severity:
+    critical: 40
+    high: 25
+    medium: 10
+    low: 5
+    info: 1
+    
+  asset_exposure:
+    publicly_accessible: 15
+    no_waf: 10
+    no_rate_limit: 8
+    
+  technology_factors:
+    outdated_version: 15
+    eol_software: 20
+    known_vulnerable: 25
+    
+  sensitive_services:
+    ssh: 20
+    database: 20
+    redis: 15
+    elasticsearch: 15
+    
+  intelligence_findings:
+    api_key: 30
+    aws_key: 35
+    password: 35
+    admin_panel: 20
+    internal_url: 10
+    
+  change_factors:
+    new_asset: 10
+    recent_change: 5
+    version_downgrade: 15
+
+# Storage Configuration
+storage:
+  screenshots_dir: data/screenshots
+  outputs_dir: data/outputs
+  temp_dir: data/temp
+  max_screenshot_age_days: 30
+  max_output_age_days: 90
+  
+  # Cleanup settings
+  cleanup:
+    enabled: true
+    schedule: "0 3 * * 0"  # Sunday at 3 AM
+    keep_latest_scans: 10
+
+# API Configuration
+api:
+  host: 0.0.0.0
+  port: 8000
+  debug: false
+  cors_origins:
+    - http://localhost:3000
+    - http://localhost:5173
+  max_request_size: 10485760  # 10 MB
+  
+# Frontend Configuration
+frontend:
+  url: http://localhost:3000
+  items_per_page: 50
+
+# Logging Configuration
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: logs/reconxploit.log
+  max_bytes: 10485760  # 10 MB
+  backup_count: 5
+
+# Security Settings
+security:
+  secret_key: "CHANGE_THIS_TO_RANDOM_SECRET_KEY"
+  jwt_algorithm: HS256
+  jwt_expiration_hours: 24
+  
+# Feature Flags
+features:
+  change_detection: true
+  risk_scoring: true
+  screenshot_capture: true
+  js_analysis: true
+  port_scanning: true
+  vulnerability_scanning: true
+  historical_analysis: true
+  cloud_enumeration: false  # Coming soon
+  
+# Performance Tuning
+performance:
+  database_pool_size: 20
+  database_max_overflow: 40
+  cache_ttl: 3600
+  enable_query_cache: true
