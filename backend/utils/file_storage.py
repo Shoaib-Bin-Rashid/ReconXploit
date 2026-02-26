@@ -185,26 +185,42 @@ def save_js_findings(domain: str, findings: list[dict]) -> Path:
 
     Args:
         findings: list of dicts with keys:
-                  url, type (endpoint/secret/api_key), value, source_file
+                  finding_type, finding_value, source_url, js_file_url,
+                  risk_level, secret_type, context
     """
     filepath = _get_phase_file("js_findings", domain)
+    risk_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
     with open(filepath, "a", encoding="utf-8") as f:
         _write_header(f, domain, "Phase 5 — JavaScript Intelligence")
-        f.write(f"  Total findings: {len(findings)}\n\n")
 
-        # Group by type
-        by_type: dict[str, list] = {}
-        for item in findings:
-            t = item.get("type", "unknown")
-            by_type.setdefault(t, []).append(item)
+        secrets   = [x for x in findings if x.get("secret_type")]
+        endpoints = [x for x in findings if not x.get("secret_type")]
+        f.write(f"  Total findings: {len(findings)}"
+                f"  ({len(secrets)} secrets, {len(endpoints)} endpoints)\n\n")
 
-        for ftype, items in sorted(by_type.items()):
-            f.write(f"[{ftype.upper()}] ({len(items)} found)\n")
-            for item in items:
-                f.write(f"  Value:  {item.get('value', '')}\n")
-                f.write(f"  Source: {item.get('source_file', '')}\n")
-                if item.get("url"):
-                    f.write(f"  URL:    {item.get('url', '')}\n")
+        if secrets:
+            f.write("─── SECRETS ───────────────────────────────────\n")
+            for item in sorted(secrets, key=lambda x: risk_order.get(x.get("risk_level", "low"), 4)):
+                risk = item.get("risk_level", "").upper()
+                f.write(f"[{risk}] {item.get('finding_type', '').upper()}\n")
+                f.write(f"  Value:   {item.get('finding_value', '')}\n")
+                f.write(f"  Source:  {item.get('source_url', '')}\n")
+                if item.get("context"):
+                    f.write(f"  Context: {item.get('context', '')}\n")
+                f.write("\n")
+
+        if endpoints:
+            f.write("─── ENDPOINTS ─────────────────────────────────\n")
+            by_type: dict[str, list] = {}
+            for item in endpoints:
+                t = item.get("finding_type", "unknown")
+                by_type.setdefault(t, []).append(item)
+            for ftype, items in sorted(by_type.items()):
+                f.write(f"[{ftype.upper()}] ({len(items)} found)\n")
+                for item in items:
+                    f.write(f"  {item.get('finding_value', '')}\n")
+                    f.write(f"    ← {item.get('source_url', '')}\n")
                 f.write("\n")
 
     logger.info(f"JS findings saved to {filepath}")

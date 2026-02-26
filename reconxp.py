@@ -152,9 +152,18 @@ def run_phase_vulns(domain: str, scan_id: str, live_hosts: list):
 
 
 def run_phase_js(domain: str, scan_id: str, live_hosts: list):
+    from backend.modules.js_analysis import JsAnalyzer
     console.print("\n[bold cyan]🧠 Phase 5 — JS Intelligence[/bold cyan]")
-    console.print("  [yellow]⏳ Coming soon — module under construction[/yellow]")
-    return []
+    engine = JsAnalyzer(domain, scan_id)
+    count = engine.run(live_hosts)
+    secrets   = len(engine.get_secrets())
+    endpoints = len(engine.get_endpoints())
+    console.print(
+        f"  [green]✓[/green] Found [bold]{count}[/bold] findings "
+        f"([red]{secrets} secrets[/red] / [yellow]{endpoints} endpoints[/yellow]) "
+        f"→ [dim]data/js_findings/{domain}.txt[/dim]"
+    )
+    return engine.get_results()
 
 
 def run_phase_changes(domain: str, scan_id: str):
