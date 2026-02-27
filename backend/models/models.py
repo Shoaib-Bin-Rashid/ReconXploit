@@ -65,6 +65,7 @@ class Target(Base):
     alerts = relationship("Alert", back_populates="target", cascade="all, delete-orphan")
     risk_scores = relationship("RiskScore", back_populates="target", cascade="all, delete-orphan")
     snapshots = relationship("Snapshot", back_populates="target", cascade="all, delete-orphan")
+    screenshots = relationship("Screenshot", back_populates="target", cascade="all, delete-orphan")
 
     __table_args__ = (
         CheckConstraint("status IN ('active', 'paused', 'archived')", name="chk_target_status"),
@@ -103,6 +104,7 @@ class Scan(Base):
     changes = relationship("Change", back_populates="scan", cascade="all, delete-orphan")
     snapshots = relationship("Snapshot", back_populates="scan", cascade="all, delete-orphan")
     alerts = relationship("Alert", back_populates="scan")
+    screenshots = relationship("Screenshot", back_populates="scan")
 
     __table_args__ = (
         CheckConstraint(
@@ -497,3 +499,39 @@ class Alert(Base):
 
     def __repr__(self):
         return f"<Alert {self.alert_type} [{self.severity}]>"
+
+
+# ─────────────────────────────────────────────────────────────
+# Phase 8 — Screenshots
+# ─────────────────────────────────────────────────────────────
+
+class Screenshot(Base):
+    __tablename__ = "screenshots"
+
+    id               = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    target_id        = Column(String(36), ForeignKey("targets.id", ondelete="CASCADE"), nullable=False)
+    scan_id          = Column(String(36), ForeignKey("scans.id",   ondelete="SET NULL"), nullable=True)
+    url              = Column(String(2048), nullable=False)
+    file_path        = Column(String(1024))
+    page_title       = Column(String(512))
+    status_code      = Column(Integer)
+    file_size_bytes  = Column(Integer, default=0)
+    tool_used        = Column(String(50))        # gowitness / chrome-headless / html-preview
+    captured_at      = Column(DateTime, default=datetime.utcnow)
+
+    target = relationship("Target", back_populates="screenshots")
+    scan   = relationship("Scan",   back_populates="screenshots")
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("file_size_bytes", 0)
+        super().__init__(**kwargs)
+
+    __table_args__ = (
+        Index("idx_screenshots_target",  "target_id"),
+        Index("idx_screenshots_scan",    "scan_id"),
+        Index("idx_screenshots_url",     "url"),
+        Index("idx_screenshots_captured","captured_at"),
+    )
+
+    def __repr__(self):
+        return f"<Screenshot {self.url} [{self.tool_used}]>"

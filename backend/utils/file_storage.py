@@ -324,3 +324,52 @@ def save_risk_scores(domain: str, overall: int, breakdown: dict, scores: list[di
 
     logger.info(f"Risk scores saved to {filepath}")
     return filepath
+
+
+# ─────────────────────────────────────────────────────────────
+# PHASE 8 — SCREENSHOTS
+# ─────────────────────────────────────────────────────────────
+
+def save_screenshots(domain: str, results: list) -> Path:
+    """
+    Save screenshot index to data/screenshots/{domain}.txt
+
+    Args:
+        results: list of screenshot result dicts from ScreenshotEngine
+    """
+    filepath = _get_phase_file("screenshots", domain)
+
+    captured = [r for r in results if r.get("file_path")]
+    failed   = [r for r in results if not r.get("file_path")]
+
+    with open(filepath, "a", encoding="utf-8") as f:
+        _write_header(f, domain, "Phase 8 — Screenshots")
+        f.write(f"  Total URLs:   {len(results)}\n")
+        f.write(f"  Captured:     {len(captured)}\n")
+        f.write(f"  Failed:       {len(failed)}\n\n")
+
+        if captured:
+            f.write("Captured Screenshots:\n")
+            f.write("─" * 60 + "\n")
+            for r in captured:
+                tool   = r.get("tool", "unknown")
+                title  = r.get("page_title", "")
+                status = r.get("status_code", "")
+                f.write(f"  [OK] [{tool}] {r['url']}\n")
+                if title:
+                    f.write(f"       Title:  {title}\n")
+                if status:
+                    f.write(f"       Status: {status}\n")
+                if r.get("file_path"):
+                    f.write(f"       File:   {r['file_path']}\n")
+                f.write("\n")
+
+        if failed:
+            f.write("Failed:\n")
+            f.write("─" * 60 + "\n")
+            for r in failed:
+                err = r.get("error", "no screenshot produced")
+                f.write(f"  [FAIL] {r['url']} — {err}\n")
+
+    logger.info(f"Screenshots index saved to {filepath}")
+    return filepath

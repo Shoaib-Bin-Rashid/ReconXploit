@@ -34,7 +34,7 @@ MODES = {
     "full": {
         "label": "Full Scan",
         "color": "bold cyan",
-        "phases": ["discovery", "live_hosts", "ports", "vulns", "js", "changes", "risk", "alerts"],
+        "phases": ["discovery", "live_hosts", "ports", "vulns", "js", "changes", "risk", "alerts", "screenshots"],
         "description": "All phases. Best coverage.",
     },
     "passive": {
@@ -52,26 +52,27 @@ MODES = {
     "deep": {
         "label": "Deep Scan",
         "color": "bold red",
-        "phases": ["discovery", "live_hosts", "ports", "vulns", "js", "changes", "risk", "alerts"],
+        "phases": ["discovery", "live_hosts", "ports", "vulns", "js", "changes", "risk", "alerts", "screenshots"],
         "description": "Full scan + brute force wordlists. Thorough but slow.",
     },
     "auto": {
         "label": "Automation Daemon",
         "color": "bold magenta",
-        "phases": ["discovery", "live_hosts", "ports", "vulns", "js", "changes", "risk", "alerts"],
+        "phases": ["discovery", "live_hosts", "ports", "vulns", "js", "changes", "risk", "alerts", "screenshots"],
         "description": "Runs continuously on all targets. Respects schedules.",
     },
 }
 
 PHASE_LABELS = {
-    "discovery":  ("🔍", "Subdomain Discovery",   "subfinder, assetfinder, amass, findomain, crt.sh"),
-    "live_hosts": ("🌐", "Live Host Validation",  "httpx — status, title, WAF, CDN, TLS"),
-    "ports":      ("🔌", "Port & Service Scan",   "naabu + nmap"),
-    "vulns":      ("🧨", "Vulnerability Scan",    "nuclei"),
+    "discovery":   ("🔍", "Subdomain Discovery",   "subfinder, assetfinder, amass, findomain, crt.sh"),
+    "live_hosts":  ("🌐", "Live Host Validation",  "httpx — status, title, WAF, CDN, TLS"),
+    "ports":       ("🔌", "Port & Service Scan",   "naabu + nmap"),
+    "vulns":       ("🧨", "Vulnerability Scan",    "nuclei"),
     "js":         ("🧠", "JS Intelligence",       "linkfinder, secretfinder, gau"),
-    "changes":    ("📊", "Change Detection",      "diff vs last scan"),
-    "risk":       ("🎯", "Risk Scoring",          "weighted score 0-100"),
-    "alerts":     ("🔔", "Alerts",               "Telegram / Discord / Slack"),
+    "changes":     ("📊", "Change Detection",      "diff vs last scan"),
+    "risk":        ("🎯", "Risk Scoring",          "weighted score 0-100"),
+    "alerts":      ("🔔", "Alerts",               "Telegram / Discord / Slack"),
+    "screenshots": ("🖼️", "Screenshots",           "gowitness / headless Chrome"),
 }
 
 DATA_DIR    = Path(__file__).parent / "data"
@@ -212,6 +213,18 @@ def run_phase_alerts(domain: str, scan_id: str, risk_score: int,
     return sent
 
 
+def run_phase_screenshots(domain: str, scan_id: str, live_hosts: list):
+    from backend.modules.screenshots import ScreenshotEngine
+    console.print("\n[bold cyan]🖼️  Phase 8 — Screenshots[/bold cyan]")
+    engine = ScreenshotEngine(domain, scan_id)
+    captured = engine.run(live_hosts)
+    console.print(
+        f"  [green]✓[/green] [bold]{captured}[/bold] screenshot(s) captured "
+        f"→ [dim]data/screenshots/{domain}/[/dim]"
+    )
+    return engine.get_results()
+
+
 # ─────────────────────────────────────────────────────────────
 # SCAN ORCHESTRATOR
 # ─────────────────────────────────────────────────────────────
@@ -258,6 +271,9 @@ def run_scan(domain: str, mode: str):
 
     if "alerts" in phases:
         run_phase_alerts(domain, scan_id, risk_score, scan_data, changes)
+
+    if "screenshots" in phases:
+        run_phase_screenshots(domain, scan_id, live_hosts)
 
     elapsed = (datetime.now() - start).seconds
     console.print(
