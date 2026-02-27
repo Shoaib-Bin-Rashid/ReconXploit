@@ -214,3 +214,14 @@ performance:
   database_max_overflow: 40
   cache_ttl: 3600
   enable_query_cache: true
+
+# Scheduler Configuration
+scheduler:
+  enabled: true
+  default_interval_hours: 24      # how often to re-scan a target by default
+  quick_interval_hours: 6         # interval for high-risk targets
+  passive_interval_hours: 72      # interval for passive-only scans
+  max_concurrent_jobs: 3          # max simultaneous scans
+  state_file: data/scheduler_state.json   # persists run history
+  log_file: data/scheduler.log           # scheduler log
+  skip_if_scan_running: true      # don't start a new scan if one is running

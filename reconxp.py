@@ -284,10 +284,11 @@ def run_scan(domain: str, mode: str):
 
 
 # ─────────────────────────────────────────────────────────────
-# AUTO MODE — DAEMON
+# AUTO MODE — SCHEDULER DAEMON
 # ─────────────────────────────────────────────────────────────
 
 def load_targets_from_file() -> list:
+    """Legacy loader — used for simple non-daemon mode."""
     if not TARGETS_FILE.exists():
         return []
     targets = []
@@ -298,36 +299,48 @@ def load_targets_from_file() -> list:
         parts = [p.strip() for p in line.split("|")]
         if parts:
             targets.append({
-                "domain":  parts[0] if len(parts) > 0 else "",
-                "status":  parts[3] if len(parts) > 3 else "active",
+                "domain": parts[0] if len(parts) > 0 else "",
+                "status": parts[3] if len(parts) > 3 else "active",
             })
     return [t for t in targets if t["status"] == "active" and t["domain"]]
 
 
+def _print_scheduler_status(summary: dict) -> None:
+    """Print a compact status line after each scheduler cycle."""
+    console.print(
+        f"  [dim]⏱  targets={summary['total_targets']}  "
+        f"running={summary['running']}  "
+        f"total_runs={summary['total_runs']}[/dim]"
+    )
+
+
 def run_auto_mode(interval: int):
+    from backend.modules.scheduler import ScanScheduler
+
     console.print(Panel(
         "[bold magenta]🤖 Automation Daemon Started[/bold magenta]\n\n"
-        f"  Targets file: [dim]data/targets.txt[/dim]\n"
-        f"  Cycle every:  [bold]{interval}s[/bold]\n\n"
-        "  Stop:         [dim]Ctrl+C[/dim]",
+        f"  Targets file:    [dim]data/targets.txt[/dim]\n"
+        f"  State file:      [dim]data/scheduler_state.json[/dim]\n"
+        f"  Poll every:      [bold]{interval}s[/bold]\n"
+        f"  Max concurrent:  [bold]3[/bold]\n\n"
+        "  Add targets:     [dim]edit data/targets.txt[/dim]\n"
+        "  Stop:            [dim]Ctrl+C[/dim]",
         title="[bold cyan]ReconXploit — Auto Mode[/bold cyan]",
         border_style="magenta",
     ))
-    cycle = 0
-    try:
-        while True:
-            cycle += 1
-            targets = load_targets_from_file()
-            if not targets:
-                console.print("[yellow]No active targets in data/targets.txt — waiting...[/yellow]")
-            else:
-                console.rule(f"[magenta]Cycle #{cycle} — {len(targets)} targets — {datetime.now().strftime('%H:%M:%S')}[/magenta]")
-                for t in targets:
-                    run_scan(t["domain"], "full")
-            console.print(f"[dim]Next cycle in {interval}s. Ctrl+C to stop.[/dim]")
-            time.sleep(interval)
-    except KeyboardInterrupt:
-        console.print("\n[bold yellow]Automation stopped.[/bold yellow]")
+
+    if not TARGETS_FILE.exists() or not TARGETS_FILE.read_text().strip():
+        console.print(
+            "[yellow]⚠  No targets found in data/targets.txt[/yellow]\n"
+            "[dim]  Add targets with:  python cli.py add example.com[/dim]\n"
+        )
+
+    scheduler = ScanScheduler(
+        max_concurrent=3,
+        poll_interval=interval,
+        default_interval_h=24,
+    )
+    scheduler.start(cycle_callback=_print_scheduler_status)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -343,9 +356,13 @@ def run_auto_mode(interval: int):
     help="full=all phases | passive=discovery only | quick=discovery+live | deep=full+brute | auto=daemon",
 )
 @click.option("--interval", "-i", default=3600, show_default=True,
-              help="Seconds between cycles in --mode auto")
+              help="Poll interval in seconds for --mode auto")
+@click.option("--force", "-f", is_flag=True, default=False,
+              help="Force immediate re-scan (ignore scheduled next_run time)")
+@click.option("--status", is_flag=True, default=False,
+              help="Show scheduler status for all targets and exit")
 @click.option("--no-banner", is_flag=True, hidden=True)
-def main(target, mode, interval, no_banner):
+def main(target, mode, interval, force, status, no_banner):
     """
     \b
     ReconXploit — Automated Recon Platform
@@ -357,10 +374,17 @@ def main(target, mode, interval, no_banner):
       python reconxp.py target.com --mode quick     # Quick scan
       python reconxp.py target.com --mode deep      # Deep scan
       python reconxp.py --mode auto                 # Daemon on all targets
-      python reconxp.py --mode auto --interval 1800 # Every 30 minutes
+      python reconxp.py --mode auto --interval 1800 # Poll every 30 minutes
+      python reconxp.py --status                    # Show scheduler status
+      python reconxp.py target.com --force          # Force immediate rescan
     """
     if not no_banner:
         print_banner()
+
+    # Show scheduler status table
+    if status:
+        _print_status_table()
+        return
 
     if mode == "auto":
         if target:
@@ -376,8 +400,68 @@ def main(target, mode, interval, no_banner):
         console.print("  python reconxp.py --mode auto\n")
         sys.exit(1)
 
+    if force:
+        console.print(f"[bold yellow]⚡ Force rescan: {target}[/bold yellow]\n")
+
     print_mode_info(mode, target)
     run_scan(target, mode)
+
+
+def _print_status_table():
+    """Print a rich table of scheduler status for all known targets."""
+    from backend.modules.scheduler import SchedulerState
+    from rich.table import Table
+
+    state = SchedulerState()
+    rows  = []
+    now   = datetime.utcnow()
+
+    for domain, info in sorted(state.all_targets().items()):
+        next_run = info.get("next_run")
+        if next_run:
+            try:
+                eta = datetime.fromisoformat(next_run) - now
+                total_s = int(eta.total_seconds())
+                if total_s < 0:
+                    eta_str = "[red]OVERDUE[/red]"
+                else:
+                    h, rem = divmod(total_s, 3600)
+                    m, _   = divmod(rem, 60)
+                    eta_str = f"{h}h {m}m" if h else f"{m}m"
+            except ValueError:
+                eta_str = "?"
+        else:
+            eta_str = "[yellow]DUE NOW[/yellow]"
+
+        score = info.get("last_score", 0)
+        score_color = "red" if score >= 80 else "yellow" if score >= 40 else "green"
+
+        rows.append((
+            domain,
+            info.get("mode", "full"),
+            info.get("status", "idle"),
+            info.get("last_run", "never"),
+            eta_str,
+            f"[{score_color}]{score}[/{score_color}]",
+            str(info.get("run_count", 0)),
+        ))
+
+    table = Table(title="Scheduler Status", box=box.ROUNDED, show_lines=True)
+    table.add_column("Domain",      style="bold cyan", no_wrap=True)
+    table.add_column("Mode",        style="dim")
+    table.add_column("Status",      style="bold")
+    table.add_column("Last Run",    style="dim")
+    table.add_column("Next In",     justify="right")
+    table.add_column("Score",       justify="center")
+    table.add_column("Runs",        justify="right", style="dim")
+
+    for row in rows:
+        table.add_row(*row)
+
+    if not rows:
+        console.print("[dim]No targets scheduled yet. Add targets to data/targets.txt[/dim]")
+    else:
+        console.print(table)
 
 
 if __name__ == "__main__":
