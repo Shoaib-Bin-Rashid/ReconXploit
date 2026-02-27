@@ -278,3 +278,49 @@ def save_changes(domain: str, changes: list[dict]) -> Path:
 
     logger.info(f"Changes saved to {filepath}")
     return filepath
+
+
+# ─────────────────────────────────────────────────────────────
+# PHASE 7 — RISK SCORES
+# ─────────────────────────────────────────────────────────────
+
+def save_risk_scores(domain: str, overall: int, breakdown: dict, scores: list[dict]) -> Path:
+    """
+    Save risk score results to data/risk_scores/{domain}.txt
+
+    Args:
+        overall:   0-100 overall score
+        breakdown: dict of category -> score
+        scores:    list of per-asset score dicts
+    """
+    filepath = _get_phase_file("risk_scores", domain)
+
+    label_map = {
+        range(80, 101): "🔴 CRITICAL",
+        range(60, 80):  "🟠 HIGH",
+        range(40, 60):  "🟡 MEDIUM",
+        range(20, 40):  "🟢 LOW",
+        range(0, 20):   "⚪ INFO",
+    }
+    label = next((v for r, v in label_map.items() if overall in r), "⚪ INFO")
+
+    with open(filepath, "a", encoding="utf-8") as f:
+        _write_header(f, domain, "Phase 7 — Risk Score")
+        f.write(f"  Overall Score: {overall}/100  {label}\n\n")
+
+        f.write("Score Breakdown:\n")
+        f.write("─" * 40 + "\n")
+        for category, score in sorted(breakdown.items(), key=lambda x: -x[1]):
+            bar = "█" * (score // 5) + "░" * ((20 - score // 5) if score < 100 else 0)
+            f.write(f"  {category:<25} {score:>3}  {bar}\n")
+        f.write("\n")
+
+        host_scores = [s for s in scores if s.get("asset_type") == "live_host"]
+        if host_scores:
+            f.write("Per-Host Scores:\n")
+            f.write("─" * 40 + "\n")
+            for s in sorted(host_scores, key=lambda x: -x.get("score", 0)):
+                f.write(f"  {s.get('score', 0):>3}/100  {s.get('asset_id', '')}\n")
+
+    logger.info(f"Risk scores saved to {filepath}")
+    return filepath

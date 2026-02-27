@@ -34,7 +34,7 @@ MODES = {
     "full": {
         "label": "Full Scan",
         "color": "bold cyan",
-        "phases": ["discovery", "live_hosts", "ports", "vulns", "js", "changes"],
+        "phases": ["discovery", "live_hosts", "ports", "vulns", "js", "changes", "risk", "alerts"],
         "description": "All phases. Best coverage.",
     },
     "passive": {
@@ -52,13 +52,13 @@ MODES = {
     "deep": {
         "label": "Deep Scan",
         "color": "bold red",
-        "phases": ["discovery", "live_hosts", "ports", "vulns", "js", "changes"],
+        "phases": ["discovery", "live_hosts", "ports", "vulns", "js", "changes", "risk", "alerts"],
         "description": "Full scan + brute force wordlists. Thorough but slow.",
     },
     "auto": {
         "label": "Automation Daemon",
         "color": "bold magenta",
-        "phases": ["discovery", "live_hosts", "ports", "vulns", "js", "changes"],
+        "phases": ["discovery", "live_hosts", "ports", "vulns", "js", "changes", "risk", "alerts"],
         "description": "Runs continuously on all targets. Respects schedules.",
     },
 }
@@ -70,6 +70,8 @@ PHASE_LABELS = {
     "vulns":      ("🧨", "Vulnerability Scan",    "nuclei"),
     "js":         ("🧠", "JS Intelligence",       "linkfinder, secretfinder, gau"),
     "changes":    ("📊", "Change Detection",      "diff vs last scan"),
+    "risk":       ("🎯", "Risk Scoring",          "weighted score 0-100"),
+    "alerts":     ("🔔", "Alerts",               "Telegram / Discord / Slack"),
 }
 
 DATA_DIR    = Path(__file__).parent / "data"
@@ -182,6 +184,34 @@ def run_phase_changes(domain: str, scan_id: str, current_data: dict):
     return engine.get_results()
 
 
+def run_phase_risk(domain: str, scan_id: str, scan_data: dict) -> int:
+    from backend.modules.risk_scoring import RiskScorer
+    console.print("\n[bold cyan]🎯 Phase 7 — Risk Scoring[/bold cyan]")
+    scorer = RiskScorer(domain, scan_id)
+    score  = scorer.run(scan_data)
+    label  = scorer.get_label()
+    color  = {"CRITICAL": "red", "HIGH": "yellow", "MEDIUM": "yellow",
+               "LOW": "green", "INFO": "dim"}.get(label, "white")
+    console.print(
+        f"  [green]✓[/green] Risk score: [{color}][bold]{score}/100  {label}[/bold][/{color}] "
+        f"→ [dim]data/risk_scores/{domain}.txt[/dim]"
+    )
+    return score
+
+
+def run_phase_alerts(domain: str, scan_id: str, risk_score: int,
+                     scan_data: dict, changes: list):
+    from backend.modules.alerts import AlertManager
+    console.print("\n[bold cyan]🔔 Phase 7b — Alerts[/bold cyan]")
+    manager = AlertManager(domain, scan_id)
+    sent = manager.run(risk_score, scan_data, changes)
+    if sent > 0:
+        console.print(f"  [green]✓[/green] Alert sent to [bold]{sent}[/bold] channel(s)")
+    else:
+        console.print("  [dim]No alerts sent (no channels configured or below threshold)[/dim]")
+    return sent
+
+
 # ─────────────────────────────────────────────────────────────
 # SCAN ORCHESTRATOR
 # ─────────────────────────────────────────────────────────────
@@ -194,6 +224,8 @@ def run_scan(domain: str, mode: str):
     console.rule(f"[bold cyan]Scanning: {domain}[/bold cyan]")
 
     subdomains, live_hosts, ports, vulns, js_findings = [], [], [], [], []
+    changes  = []
+    risk_score = 0
 
     if "discovery" in phases:
         subdomains = run_phase_discovery(domain, scan_id)
@@ -210,14 +242,22 @@ def run_scan(domain: str, mode: str):
     if "js" in phases:
         js_findings = run_phase_js(domain, scan_id, live_hosts)
 
+    scan_data = {
+        "subdomains":      subdomains,
+        "live_hosts":      live_hosts,
+        "ports":           ports,
+        "vulnerabilities": vulns,
+        "js_findings":     js_findings,
+    }
+
     if "changes" in phases:
-        run_phase_changes(domain, scan_id, {
-            "subdomains":      subdomains,
-            "live_hosts":      live_hosts,
-            "ports":           ports,
-            "vulnerabilities": vulns,
-            "js_findings":     js_findings,
-        })
+        changes = run_phase_changes(domain, scan_id, scan_data)
+
+    if "risk" in phases:
+        risk_score = run_phase_risk(domain, scan_id, scan_data)
+
+    if "alerts" in phases:
+        run_phase_alerts(domain, scan_id, risk_score, scan_data, changes)
 
     elapsed = (datetime.now() - start).seconds
     console.print(
