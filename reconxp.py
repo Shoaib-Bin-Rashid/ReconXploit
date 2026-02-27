@@ -166,10 +166,20 @@ def run_phase_js(domain: str, scan_id: str, live_hosts: list):
     return engine.get_results()
 
 
-def run_phase_changes(domain: str, scan_id: str):
+def run_phase_changes(domain: str, scan_id: str, current_data: dict):
+    from backend.modules.change_detection import ChangeDetector
     console.print("\n[bold cyan]📊 Phase 6 — Change Detection[/bold cyan]")
-    console.print("  [yellow]⏳ Coming soon — module under construction[/yellow]")
-    return []
+    engine = ChangeDetector(domain, scan_id)
+    count  = engine.run(current_data)
+    if count == 0:
+        console.print("  [dim]First scan — baseline saved → data/snapshots/{}.json[/dim]".format(domain))
+    else:
+        sig = len(engine.get_significant())
+        console.print(
+            f"  [green]✓[/green] [bold]{count}[/bold] changes detected "
+            f"([red]{sig} significant[/red]) → [dim]data/changes/{domain}.txt[/dim]"
+        )
+    return engine.get_results()
 
 
 # ─────────────────────────────────────────────────────────────
@@ -183,7 +193,7 @@ def run_scan(domain: str, mode: str):
 
     console.rule(f"[bold cyan]Scanning: {domain}[/bold cyan]")
 
-    subdomains, live_hosts = [], []
+    subdomains, live_hosts, ports, vulns, js_findings = [], [], [], [], []
 
     if "discovery" in phases:
         subdomains = run_phase_discovery(domain, scan_id)
@@ -192,16 +202,22 @@ def run_scan(domain: str, mode: str):
         live_hosts = run_phase_live_hosts(domain, scan_id, subdomains)
 
     if "ports" in phases:
-        run_phase_ports(domain, scan_id, live_hosts)
+        ports = run_phase_ports(domain, scan_id, live_hosts)
 
     if "vulns" in phases:
-        run_phase_vulns(domain, scan_id, live_hosts)
+        vulns = run_phase_vulns(domain, scan_id, live_hosts)
 
     if "js" in phases:
-        run_phase_js(domain, scan_id, live_hosts)
+        js_findings = run_phase_js(domain, scan_id, live_hosts)
 
     if "changes" in phases:
-        run_phase_changes(domain, scan_id)
+        run_phase_changes(domain, scan_id, {
+            "subdomains":      subdomains,
+            "live_hosts":      live_hosts,
+            "ports":           ports,
+            "vulnerabilities": vulns,
+            "js_findings":     js_findings,
+        })
 
     elapsed = (datetime.now() - start).seconds
     console.print(

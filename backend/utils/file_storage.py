@@ -6,6 +6,7 @@ Every phase writes to: data/{phase}/{domain}.txt
 
 from pathlib import Path
 from datetime import datetime
+import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -237,27 +238,43 @@ def save_changes(domain: str, changes: list[dict]) -> Path:
 
     Args:
         changes: list of dicts with keys:
-                 change_type, asset, old_value, new_value, severity, significant
+                 change_type, asset_type, asset_id, old_value, new_value,
+                 severity, is_significant, detected_at
     """
     filepath = _get_phase_file("changes", domain)
+    sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
     with open(filepath, "a", encoding="utf-8") as f:
         _write_header(f, domain, "Phase 6 — Change Detection")
-        significant = [c for c in changes if c.get("significant")]
-        f.write(f"  Total changes:      {len(changes)}\n")
-        f.write(f"  Significant:        {len(significant)}\n\n")
+        significant = [c for c in changes if c.get("is_significant")]
+        f.write(f"  Total changes:  {len(changes)}\n")
+        f.write(f"  Significant:    {len(significant)}\n\n")
 
-        if significant:
-            f.write("⚠ SIGNIFICANT CHANGES (review these):\n")
-            for c in significant:
-                f.write(f"  [{c.get('severity', '').upper()}] {c.get('change_type', '')}\n")
-                f.write(f"    Asset:  {c.get('asset', '')}\n")
-                f.write(f"    Before: {c.get('old_value', '')}\n")
-                f.write(f"    After:  {c.get('new_value', '')}\n")
-                f.write("\n")
+        if not changes:
+            f.write("  No changes detected (or first scan baseline).\n")
+        else:
+            if significant:
+                f.write("⚠  SIGNIFICANT — review immediately:\n")
+                f.write("─" * 50 + "\n")
+                for c in sorted(significant, key=lambda x: sev_order.get(x.get("severity", "low"), 4)):
+                    sev = c.get("severity", "").upper()
+                    f.write(f"  [{sev}] {c.get('change_type', '')}\n")
+                    f.write(f"    Asset:  {c.get('asset_id', '')}\n")
+                    if c.get("old_value"):
+                        f.write(f"    Before: {json.dumps(c['old_value'])}\n")
+                    if c.get("new_value"):
+                        f.write(f"    After:  {json.dumps(c['new_value'])}\n")
+                    f.write("\n")
 
-        f.write("\nAll changes:\n")
-        for c in changes:
-            f.write(f"  {c.get('change_type', '')} | {c.get('asset', '')} | {c.get('severity', '')}\n")
+            f.write("All changes:\n")
+            f.write("─" * 50 + "\n")
+            for c in changes:
+                sev = c.get("severity", "")
+                sig = " ★" if c.get("is_significant") else ""
+                f.write(
+                    f"  [{sev.upper()}]{sig} {c.get('change_type', '')} "
+                    f"→ {c.get('asset_id', '')}\n"
+                )
 
     logger.info(f"Changes saved to {filepath}")
     return filepath
