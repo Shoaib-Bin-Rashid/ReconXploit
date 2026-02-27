@@ -17,6 +17,10 @@ os.environ.setdefault("RECON_DB_PASSWORD", "postgres")
 os.environ.setdefault("RECON_DEBUG", "false")
 os.environ.setdefault("RECON_SECRET_KEY", "test-secret-key")
 
+# ── Celery eager mode (no broker needed in tests) ─────────────────────────────
+os.environ.setdefault("CELERY_TASK_ALWAYS_EAGER", "1")
+os.environ.setdefault("CELERY_TASK_EAGER_PROPAGATES", "1")
+
 # ── SQLAlchemy in-memory SQLite for unit tests ───────────────────────────────
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker

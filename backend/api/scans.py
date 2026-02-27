@@ -90,7 +90,8 @@ def list_scans(
 def trigger_scan(body: ScanTrigger, background_tasks: BackgroundTasks):
     """
     Enqueue a scan for the given domain.
-    The scan runs asynchronously; poll GET /scans/{scan_id} for status.
+    Dispatches to Celery if Redis is reachable; falls back to BackgroundTasks.
+    Poll GET /scans/{scan_id} for status.
     """
     with get_db_context() as db:
         target = db.query(Target).filter(Target.domain == body.domain).first()
@@ -107,9 +108,33 @@ def trigger_scan(body: ScanTrigger, background_tasks: BackgroundTasks):
         db.add(scan)
         db.commit()
 
-    background_tasks.add_task(_run_scan_bg, body.domain, body.mode, scan_id)
-    logger.info(f"Scan queued: {body.domain} ({body.mode}) → {scan_id}")
-    return {"scan_id": scan_id, "status": "pending", "domain": body.domain, "mode": body.mode}
+    dispatched_via = _dispatch_scan(body.domain, body.mode, scan_id, background_tasks)
+    logger.info(f"Scan queued via {dispatched_via}: {body.domain} ({body.mode}) → {scan_id}")
+    return {
+        "scan_id":        scan_id,
+        "status":         "pending",
+        "domain":         body.domain,
+        "mode":           body.mode,
+        "dispatched_via": dispatched_via,
+    }
+
+
+@router.get("/{scan_id}/task", summary="Get Celery task state for a scan")
+def get_task_state(scan_id: str):
+    """
+    Return the Celery PROGRESS meta for an async scan.
+    Falls back gracefully when Celery/Redis is unavailable.
+    """
+    try:
+        from backend.tasks.celery_app import celery_app
+        result = celery_app.AsyncResult(scan_id)
+        return {
+            "task_id": scan_id,
+            "state":   result.state,
+            "meta":    result.info if isinstance(result.info, dict) else {},
+        }
+    except Exception:
+        return {"task_id": scan_id, "state": "UNKNOWN", "meta": {}}
 
 
 @router.get("/{scan_id}", response_model=ScanOut, summary="Get scan status")
@@ -174,7 +199,26 @@ def get_scan_results(scan_id: str):
 
 
 # ─────────────────────────────────────────────
-# Background task
+# Dispatch helpers
+# ─────────────────────────────────────────────
+
+def _dispatch_scan(domain: str, mode: str, scan_id: str, background_tasks: BackgroundTasks) -> str:
+    """
+    Try Celery first; fall back to FastAPI BackgroundTasks if Redis unavailable.
+    Returns 'celery' or 'background_thread'.
+    """
+    try:
+        from backend.tasks.scan_tasks import run_full_scan
+        run_full_scan.delay(scan_id, domain, mode)
+        return "celery"
+    except Exception as celery_err:
+        logger.warning(f"Celery unavailable ({celery_err}), falling back to background thread")
+        background_tasks.add_task(_run_scan_bg, domain, mode, scan_id)
+        return "background_thread"
+
+
+# ─────────────────────────────────────────────
+# Background task (fallback)
 # ─────────────────────────────────────────────
 
 def _run_scan_bg(domain: str, mode: str, scan_id: str) -> None:
