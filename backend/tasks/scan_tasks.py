@@ -273,6 +273,13 @@ def _set_status(
             scan.stats = stats
         if error:
             scan.error_message = error
+    # Invalidate dashboard cache after any terminal state
+    if status in ("completed", "failed"):
+        try:
+            from backend.utils.cache import cache_clear_all
+            cache_clear_all()
+        except Exception:
+            pass
 
 
 def _build_scan_data(scan_id: str, domain: str, stats: Dict) -> Dict:

@@ -14,11 +14,13 @@ import uuid as uuid_mod
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Depends
 from pydantic import BaseModel, Field
 
 from backend.models.database import get_db_context
 from backend.models.models import Scan, Target, Subdomain, LiveHost, Port, Vulnerability, JsIntelligence
+from backend.utils.rate_limit import scan_rate_limiter
+from backend.utils.cache import cache_clear_all
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -87,7 +89,11 @@ def list_scans(
 
 
 @router.post("", status_code=202, summary="Trigger a new scan")
-def trigger_scan(body: ScanTrigger, background_tasks: BackgroundTasks):
+def trigger_scan(
+    body: ScanTrigger,
+    background_tasks: BackgroundTasks,
+    _: None = Depends(scan_rate_limiter),
+):
     """
     Enqueue a scan for the given domain.
     Dispatches to Celery if Redis is reachable; falls back to BackgroundTasks.
@@ -247,6 +253,9 @@ def _set_scan_status(scan_id: str, status: str) -> None:
                 if status == "completed":
                     scan.end_time = datetime.utcnow()
                 db.commit()
+        # Invalidate dashboard cache so next read reflects new scan state
+        if status in ("completed", "failed"):
+            cache_clear_all()
     except Exception as e:
         logger.warning(f"Could not update scan status: {e}")
 

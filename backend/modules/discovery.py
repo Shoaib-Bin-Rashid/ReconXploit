@@ -49,7 +49,10 @@ class SubdomainDiscovery:
                 logger.warning(f"{runner.__name__} failed: {e}")
 
         count = self._store_results()
-        save_subdomains(self.domain, list(self.results))  # save to txt file
+        # Deduplicated list for file storage
+        from backend.utils.dedup import dedup_subdomains
+        deduped = dedup_subdomains(list(self.results))
+        save_subdomains(self.domain, deduped)
         logger.info(f"Discovery complete: {count} subdomains found for {self.domain}")
         return count
 
