@@ -9,10 +9,12 @@ from datetime import datetime
 import json
 import logging
 
+from backend.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 # Base data directory (project root / data)
-DATA_DIR = Path(__file__).parent.parent.parent / "data"
+DATA_DIR = settings.base_path / "data"
 
 
 def _get_phase_file(phase: str, domain: str) -> Path:
@@ -372,4 +374,21 @@ def save_screenshots(domain: str, results: list) -> Path:
                 f.write(f"  [FAIL] {r['url']} — {err}\n")
 
     logger.info(f"Screenshots index saved to {filepath}")
+    return filepath
+
+
+# ─────────────────────────────────────────────────────────────
+# UNIFIED REPORT
+# ─────────────────────────────────────────────────────────────
+
+def save_unified_report(domain: str, scan_data: dict) -> Path:
+    """Save a unified JSON report of the scan to data/outputs/{domain}_report.json"""
+    outputs_dir = DATA_DIR / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    filepath = outputs_dir / f"{domain}_report.json"
+    
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(scan_data, f, indent=2)
+        
+    logger.info(f"Unified JSON report saved to {filepath}")
     return filepath

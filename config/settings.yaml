@@ -41,7 +41,7 @@ tools:
   assetfinder: assetfinder
   amass: amass
   findomain: findomain
-  httpx: httpx
+  httpx: /opt/homebrew/bin/httpx
   gowitness: gowitness
   naabu: naabu
   nmap: nmap

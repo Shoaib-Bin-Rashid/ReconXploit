@@ -65,11 +65,10 @@ class SubdomainDiscovery:
         cmd = [
             settings.tool_subfinder,
             "-d", self.domain,
-            "-all",
             "-silent",
             "-json",
         ]
-        output = self._execute(cmd, "subfinder")
+        output = self._execute(cmd, "subfinder", timeout=120)
         for line in output.strip().splitlines():
             try:
                 data = json.loads(line)
@@ -99,7 +98,7 @@ class SubdomainDiscovery:
             "-d", self.domain,
             "-nocolor",
         ]
-        output = self._execute(cmd, "amass", timeout=300)
+        output = self._execute(cmd, "amass", timeout=60)
         for line in output.strip().splitlines():
             subdomain = line.strip().lower()
             if subdomain and self.domain in subdomain:
@@ -119,47 +118,45 @@ class SubdomainDiscovery:
                 self.results.add((subdomain, "findomain"))
 
     def _run_crtsh(self):
-        """Query crt.sh certificate transparency logs."""
+        """Query crt.sh certificate transparency logs with retry."""
         import urllib.request
         import urllib.error
+        import time
 
         url = f"https://crt.sh/?q=%.{self.domain}&output=json"
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "ReconXploit/0.1"})
-            with urllib.request.urlopen(req, timeout=30) as response:
-                data = json.loads(response.read().decode())
-                for entry in data:
-                    name = entry.get("name_value", "")
-                    for subdomain in name.splitlines():
-                        subdomain = subdomain.strip().lower().lstrip("*.")
-                        if subdomain and self.domain in subdomain:
-                            self.results.add((subdomain, "crt.sh"))
-        except Exception as e:
-            logger.warning(f"crt.sh query failed: {e}")
+        
+        for attempt in range(3):
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "ReconXploit/0.1"})
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    data = json.loads(response.read().decode())
+                    for entry in data:
+                        name = entry.get("name_value", "")
+                        for subdomain in name.splitlines():
+                            subdomain = subdomain.strip().lower().lstrip("*.")
+                            if subdomain and self.domain in subdomain:
+                                self.results.add((subdomain, "crt.sh"))
+                return # Success
+            except Exception as e:
+                logger.warning(f"crt.sh query failed (attempt {attempt + 1}/3): {e}")
+                time.sleep(2 ** attempt)
 
     # ─────────────────────────────────────────────
     # HELPERS
     # ─────────────────────────────────────────────
 
     def _execute(self, cmd: List[str], tool_name: str, timeout: int = 300) -> str:
-        """Execute a shell command and return stdout."""
-        logger.debug(f"Executing: {' '.join(cmd)}")
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-            if result.returncode != 0:
-                logger.warning(f"{tool_name} exited with code {result.returncode}: {result.stderr[:200]}")
-            return result.stdout
-        except subprocess.TimeoutExpired:
-            logger.warning(f"{tool_name} timed out after {timeout}s")
-            return ""
-        except FileNotFoundError:
-            logger.warning(f"{tool_name} not found in PATH. Install with scripts/install_tools.sh")
-            return ""
+        """Execute a shell command and return stdout using ToolExecutor."""
+        from backend.utils.executor import ToolExecutor
+        # For tools like amass which might take longer, give them a chance
+        if tool_name == "amass":
+            timeout = max(timeout, 300) # Give amass at least 5 mins
+            
+        ex = ToolExecutor(tool_name=tool_name, timeout=timeout, max_retries=1)
+        res = ex.run(cmd)
+        if not res.success:
+            logger.warning(f"{tool_name} failed: {res.error}")
+        return res.stdout
 
     def _store_results(self) -> int:
         """Store discovered subdomains in the database."""

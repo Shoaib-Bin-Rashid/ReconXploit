@@ -101,10 +101,9 @@ class VulnerabilityScanner:
             cmd += ["-severity", "critical,high,medium", "-tags", QUICK_TAGS]
         elif mode == "deep":
             cmd += ["-severity", "critical,high,medium,low,info"]
-            # Include intrusive templates in deep mode
             cmd += ["-include-tags", "intrusive"]
-        else:  # full
-            cmd += ["-severity", "critical,high,medium,low,info"]
+        else:  # full — limit to critical/high/medium with common tags for speed
+            cmd += ["-severity", "critical,high,medium", "-tags", "cve,misconfig,exposure,default-login,takeover"]
 
         stdin_data = "\n".join(urls)
         logger.debug(f"Running nuclei on {len(urls)} URLs")
@@ -115,14 +114,14 @@ class VulnerabilityScanner:
                 input=stdin_data,
                 capture_output=True,
                 text=True,
-                timeout=3600,  # 1 hour max
+                timeout=600,  # 10 min max
             )
             if result.returncode not in (0, 1) and result.stderr:
                 logger.warning(f"nuclei stderr: {result.stderr[:300]}")
             return result.stdout
 
         except subprocess.TimeoutExpired:
-            logger.warning("nuclei timed out after 3600s")
+            logger.warning("nuclei timed out after 600s")
             return ""
         except FileNotFoundError:
             logger.warning(

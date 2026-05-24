@@ -437,7 +437,7 @@ class RiskScore(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     target_id = Column(String(36), ForeignKey("targets.id", ondelete="CASCADE"), nullable=False)
     asset_type = Column(String(50), nullable=False)   # subdomain, live_host, vulnerability
-    asset_id = Column(String(36), nullable=False)
+    asset_id = Column(Text, nullable=False)
     score = Column(Integer, nullable=False)           # 0-100
     score_factors = Column(JSONBType)
     calculated_at = Column(DateTime, default=datetime.utcnow)

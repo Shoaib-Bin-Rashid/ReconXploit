@@ -286,31 +286,34 @@ class JsAnalyzer:
 
     def _run_gau(self, domain: str) -> List[str]:
         """Run gau (GetAllURLs) for passive URL harvesting."""
+        from backend.utils.executor import ToolExecutor
+        from backend.core.config import settings
         try:
-            result = subprocess.run(
-                ["gau", "--threads", "5", "--timeout", "15", domain],
-                capture_output=True, text=True, timeout=120,
-            )
-            return [u.strip() for u in result.stdout.splitlines() if u.strip()]
-        except FileNotFoundError:
-            logger.debug("[Phase 5] gau not installed, skipping")
-            return []
-        except (subprocess.TimeoutExpired, Exception) as e:
+            ex = ToolExecutor(tool_name="gau", timeout=300, max_retries=1)
+            res = ex.run([settings.tool_gau, "--threads", "5", "--timeout", "15", domain])
+            if res.success:
+                return [u.strip() for u in res.stdout.splitlines() if u.strip()]
+            else:
+                logger.warning(f"[Phase 5] gau failed: {res.error}")
+                return []
+        except Exception as e:
             logger.warning(f"[Phase 5] gau error: {e}")
             return []
 
     def _run_waybackurls(self, domain: str) -> List[str]:
         """Run waybackurls for historical URL harvesting."""
+        from backend.utils.executor import ToolExecutor
+        from backend.core.config import settings
         try:
-            result = subprocess.run(
-                ["waybackurls", domain],
-                capture_output=True, text=True, timeout=120,
-            )
-            return [u.strip() for u in result.stdout.splitlines() if u.strip()]
-        except FileNotFoundError:
-            logger.debug("[Phase 5] waybackurls not installed, skipping")
-            return []
-        except (subprocess.TimeoutExpired, Exception) as e:
+            ex = ToolExecutor(tool_name="waybackurls", timeout=300, max_retries=1)
+            # waybackurls takes domain via stdin or positional depending on version. We'll use positional for now.
+            res = ex.run([settings.tool_waybackurls, domain])
+            if res.success:
+                return [u.strip() for u in res.stdout.splitlines() if u.strip()]
+            else:
+                logger.warning(f"[Phase 5] waybackurls failed: {res.error}")
+                return []
+        except Exception as e:
             logger.warning(f"[Phase 5] waybackurls error: {e}")
             return []
 

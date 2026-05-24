@@ -40,12 +40,18 @@ SENSITIVE_PORTS: Set[int] = {
     5900, 5901,           # VNC
     11211,                # Memcached
     4848, 8161,           # GlassFish, ActiveMQ
+    161, 162,             # SNMP (UDP) — huge bug bounty source
+    69,                   # TFTP
+    137, 138, 139,        # NetBIOS
 }
 
 # Ports to scan in full/deep mode
 TOP_PORTS_QUICK = "21,22,23,25,80,443,8080,8443,3000,5000,8000,8888,9000,3306,5432,6379,27017,9200"
-TOP_PORTS_FULL  = "1-10000"
+TOP_PORTS_FULL  = "21,22,23,25,53,80,110,143,443,445,587,993,995,1433,1521,2181,2375,2376,3000,3306,3389,4848,5000,5432,5601,5900,6379,6443,7474,8000,8080,8081,8443,8888,9000,9090,9200,9300,11211,27017,50000"
 TOP_PORTS_DEEP  = "1-65535"
+
+# Key UDP ports — SNMP, DNS, NTP, TFTP, NetBIOS, SSDP, mDNS, IPSec, Syslog, RIP
+UDP_PORTS = "53,67,69,111,123,137,138,139,161,162,500,514,520,1900,4500,5353"
 
 
 class PortScanner:
@@ -76,17 +82,28 @@ class PortScanner:
 
         logger.info(f"Starting port scan on {len(ips)} IPs for {self.domain} (mode={mode})")
 
+        if not settings.is_root:
+            logger.info("Running in non-root mode: OS fingerprinting and UDP scanning disabled.")
+
         port_range = self._get_port_range(mode)
 
-        # Stage 1: naabu fast discovery (optional)
+        # Stage 1: naabu fast TCP discovery (optional)
         open_ports_by_ip = self._run_naabu(ips, port_range)
 
-        # Stage 2: nmap service detection
+        # Stage 2: nmap TCP service detection
         if open_ports_by_ip:
             self.results = self._run_nmap_targeted(open_ports_by_ip)
         else:
             # naabu not available or found nothing — run nmap directly
             self.results = self._run_nmap_direct(ips, port_range)
+
+        # Stage 3: nmap UDP scan (key ports — SNMP, DNS, NTP, NetBIOS, etc.)
+        # Only run in full/deep mode — UDP is slow
+        if mode in ("full", "deep"):
+            udp_results = self._run_nmap_udp(ips)
+            self.results.extend(udp_results)
+            if udp_results:
+                logger.info(f"UDP scan found {len(udp_results)} open UDP ports")
 
         self._mark_sensitive()
         count = self._store_results()
@@ -148,7 +165,7 @@ class PortScanner:
                 input=stdin_data,
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=90,
             )
             return self._parse_naabu_output(result.stdout)
 
@@ -156,7 +173,7 @@ class PortScanner:
             logger.info("naabu not found — falling back to nmap direct scan")
             return {}
         except subprocess.TimeoutExpired:
-            logger.warning("naabu timed out after 300s")
+            logger.warning("naabu timed out after 90s")
             return {}
 
     def _parse_naabu_output(self, raw: str) -> Dict[str, List[int]]:
@@ -200,11 +217,21 @@ class PortScanner:
                 settings.tool_nmap,
                 "-p", port_str,
                 "-sV",          # service/version detection
+                "-sC",          # default NSE scripts (banner, ssl-cert, http-title, etc.)
                 "--open",
+                "-Pn",          # skip ping — treat host as up (critical for firewalled targets)
+                "-T4",          # aggressive timing
+                "--script", "banner,ssl-cert,http-title,ssl-enum-ciphers",
                 "-oX", "-",     # XML output to stdout
-                "--host-timeout", "60s",
+                "--host-timeout", "120s",
                 ip,
             ]
+            if settings.is_root:
+                cmd.insert(4, "-O")  # Add OS detection if root
+            else:
+                cmd.insert(4, "-sT")  # Explicitly use TCP Connect scan if not root
+                logger.debug("Using nmap TCP Connect scan and skipping OS detection (requires root privileges)")
+
             raw_xml = self._execute_nmap(cmd, ip)
             all_results.extend(self._parse_nmap_xml(raw_xml))
         return all_results
@@ -216,7 +243,6 @@ class PortScanner:
     def _run_nmap_direct(self, ips: List[str], port_range: str) -> List[Dict]:
         """
         Run nmap directly when naabu is not available.
-        Uses -F (fast) for reasonable speed.
         """
         all_results = []
         for ip in ips:
@@ -224,13 +250,60 @@ class PortScanner:
                 settings.tool_nmap,
                 "-p", port_range,
                 "-sV",
+                "-sC",          # default NSE scripts
                 "--open",
+                "-Pn",          # skip ping — treat host as up
+                "-T4",          # aggressive timing
+                "--script", "banner,ssl-cert,http-title",
+                "-oX", "-",
+                "--host-timeout", "180s",
+                ip,
+            ]
+            if settings.is_root:
+                cmd.insert(4, "-O")  # OS detection
+            else:
+                cmd.insert(4, "-sT")  # Explicitly use TCP Connect scan if not root
+                logger.debug("Using nmap TCP Connect scan and skipping OS detection (requires root privileges)")
+
+            raw_xml = self._execute_nmap(cmd, ip)
+            all_results.extend(self._parse_nmap_xml(raw_xml))
+        return all_results
+
+    def _run_nmap_udp(self, ips: List[str]) -> List[Dict]:
+        """
+        Run nmap UDP scan on key ports.
+
+        Targets: SNMP (161), DNS (53), NTP (123), NetBIOS (137/138/139),
+                 TFTP (69), SSDP (1900), mDNS (5353), IPSec (500/4500), etc.
+
+        Requires root/sudo for raw socket access.
+        Gracefully returns empty list if permission denied.
+        """
+        if not settings.is_root:
+            logger.warning("UDP scan requires root privileges. Skipping Phase 3 UDP scan.")
+            return []
+
+        all_results = []
+        for ip in ips:
+            cmd = [
+                settings.tool_nmap,
+                "-sU",              # UDP scan
+                "-p", UDP_PORTS,
+                "-sV",              # version detection
+                "--open",
+                "-Pn",              # skip ping
+                "-T4",
+                "--script", "snmp-info,snmp-sysdescr,dns-recursion,ntp-info",
                 "-oX", "-",
                 "--host-timeout", "120s",
                 ip,
             ]
-            raw_xml = self._execute_nmap(cmd, ip)
-            all_results.extend(self._parse_nmap_xml(raw_xml))
+            try:
+                raw_xml = self._execute_nmap(cmd, ip)
+                results = self._parse_nmap_xml(raw_xml)
+                all_results.extend(results)
+            except Exception as e:
+                logger.debug(f"UDP scan failed for {ip}: {e} (may need sudo)")
         return all_results
 
     def _execute_nmap(self, cmd: List[str], target: str) -> str:

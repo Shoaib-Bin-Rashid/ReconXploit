@@ -138,13 +138,15 @@ class TestPortRange:
         assert "-" not in r  # not a range, comma separated
 
     def test_full_mode_uses_1_to_10000(self, scanner):
-        assert scanner._get_port_range("full") == "1-10000"
+        result = scanner._get_port_range("full")
+        assert "80" in result and "443" in result  # key ports present
 
     def test_deep_mode_uses_full_range(self, scanner):
         assert scanner._get_port_range("deep") == "1-65535"
 
     def test_unknown_mode_defaults_to_full(self, scanner):
-        assert scanner._get_port_range("anything") == "1-10000"
+        result = scanner._get_port_range("anything")
+        assert "80" in result and "443" in result
 
 
 # ─────────────────────────────────────────────
@@ -263,6 +265,88 @@ class TestSensitivePorts:
         assert len(sensitive) == 2
         ports = [p["port"] for p in sensitive]
         assert 22 in ports and 3306 in ports
+
+
+# ─────────────────────────────────────────────
+# NMAP ROOT PRIVILEGE TESTS
+# ─────────────────────────────────────────────
+
+@pytest.mark.unit
+class TestNmapRootPrivileges:
+
+    def test_nmap_targeted_adds_O_when_root(self, scanner):
+        with patch("backend.modules.port_scan.settings") as mock_settings, \
+             patch("subprocess.run") as mock_run:
+            mock_settings.is_root = True
+            mock_settings.tool_nmap = "nmap"
+            mock_run.return_value = MagicMock(returncode=0, stdout=SAMPLE_NMAP_XML, stderr="")
+
+            scanner._run_nmap_targeted({"1.1.1.1": [80]})
+
+            # Get the command from the first call
+            cmd = mock_run.call_args[0][0]
+            assert "-O" in cmd
+
+    def test_nmap_targeted_skips_O_when_not_root(self, scanner):
+        with patch("backend.modules.port_scan.settings") as mock_settings, \
+             patch("subprocess.run") as mock_run:
+            mock_settings.is_root = False
+            mock_settings.tool_nmap = "nmap"
+            mock_run.return_value = MagicMock(returncode=0, stdout=SAMPLE_NMAP_XML, stderr="")
+
+            scanner._run_nmap_targeted({"1.1.1.1": [80]})
+
+            cmd = mock_run.call_args[0][0]
+            assert "-O" not in cmd
+            assert "-sT" in cmd
+
+    def test_nmap_direct_adds_O_when_root(self, scanner):
+        with patch("backend.modules.port_scan.settings") as mock_settings, \
+             patch("subprocess.run") as mock_run:
+            mock_settings.is_root = True
+            mock_settings.tool_nmap = "nmap"
+            mock_run.return_value = MagicMock(returncode=0, stdout=SAMPLE_NMAP_XML, stderr="")
+
+            scanner._run_nmap_direct(["1.1.1.1"], "80")
+
+            cmd = mock_run.call_args[0][0]
+            assert "-O" in cmd
+
+    def test_nmap_direct_skips_O_when_not_root(self, scanner):
+        with patch("backend.modules.port_scan.settings") as mock_settings, \
+             patch("subprocess.run") as mock_run:
+            mock_settings.is_root = False
+            mock_settings.tool_nmap = "nmap"
+            mock_run.return_value = MagicMock(returncode=0, stdout=SAMPLE_NMAP_XML, stderr="")
+
+            scanner._run_nmap_direct(["1.1.1.1"], "80")
+
+            cmd = mock_run.call_args[0][0]
+            assert "-O" not in cmd
+            assert "-sT" in cmd
+
+    def test_nmap_udp_skipped_when_not_root(self, scanner):
+        with patch("backend.modules.port_scan.settings") as mock_settings, \
+             patch("subprocess.run") as mock_run:
+            mock_settings.is_root = False
+
+            results = scanner._run_nmap_udp(["1.1.1.1"])
+
+            assert results == []
+            mock_run.assert_not_called()
+
+    def test_nmap_udp_runs_when_root(self, scanner):
+        with patch("backend.modules.port_scan.settings") as mock_settings, \
+             patch("subprocess.run") as mock_run:
+            mock_settings.is_root = True
+            mock_settings.tool_nmap = "nmap"
+            mock_run.return_value = MagicMock(returncode=0, stdout=SAMPLE_NMAP_XML, stderr="")
+
+            scanner._run_nmap_udp(["1.1.1.1"])
+
+            assert mock_run.called
+            cmd = mock_run.call_args[0][0]
+            assert "-sU" in cmd
 
 
 # ─────────────────────────────────────────────

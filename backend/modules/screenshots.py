@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
+from backend.core.config import settings
 from backend.models.database import get_db_context
 from backend.utils.file_storage import save_screenshots
 
@@ -35,7 +36,6 @@ logger = logging.getLogger(__name__)
 # CONSTANTS
 # ─────────────────────────────────────────────────────────────
 
-SCREENSHOTS_DIR = Path("data/screenshots")
 TIMEOUT_SECONDS = 20
 MAX_URLS        = 200    # cap to avoid very long runs
 
@@ -50,7 +50,7 @@ class ScreenshotEngine:
         self.domain   = domain
         self.scan_id  = scan_id
         self.results: List[Dict] = []
-        self._output_dir = SCREENSHOTS_DIR / domain
+        self._output_dir = settings.screenshots_path / domain
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
     # ─────────────────────────────────────────────────
@@ -116,29 +116,34 @@ class ScreenshotEngine:
 
         try:
             cmd = [
-                "gowitness", "file",
-                "--file",      url_file,
-                "--screenshot-path", str(self._output_dir),
-                "--timeout",   str(TIMEOUT_SECONDS),
-                "--disable-db",
+                "gowitness", "scan", "file",
+                "-f",        url_file,
+                "-s",        str(self._output_dir),
+                "--timeout", str(TIMEOUT_SECONDS),
             ]
             proc = subprocess.run(
                 cmd,
                 capture_output=True, text=True,
-                timeout=TIMEOUT_SECONDS * len(urls) + 60,
+                timeout=TIMEOUT_SECONDS * len(urls) + 120,
             )
             logger.debug(f"[Phase 8] gowitness stdout: {proc.stdout[:500]}")
             if proc.returncode != 0:
                 logger.warning(f"[Phase 8] gowitness non-zero exit: {proc.stderr[:300]}")
 
-            # Collect PNG files created
-            png_files = {f.stem.lower(): f for f in self._output_dir.glob("*.png")}
+            # gowitness v3 saves as: https---hostname-port.jpeg
+            # Collect all screenshot files
+            all_shots = list(self._output_dir.glob("*.jpeg")) + list(self._output_dir.glob("*.png"))
 
             for url in urls:
                 rec = self._base_record(url)
-                # gowitness names files by URL slug
-                slug = self._url_to_slug(url).lower()
-                matched = next((p for s, p in png_files.items() if slug in s or s in slug), None)
+                # Match by converting URL to gowitness filename format
+                gw_prefix = url.replace("://", "---").replace("/", "-").replace(":", "-").rstrip("-").lower()
+                matched = next((f for f in all_shots if f.stem.lower().startswith(gw_prefix[:40])), None)
+                if not matched:
+                    # Fallback: match by hostname
+                    from urllib.parse import urlparse
+                    host = urlparse(url).netloc.lower()
+                    matched = next((f for f in all_shots if host.replace(".", "-") in f.stem.lower()), None)
                 if matched:
                     rec["file_path"]       = str(matched)
                     rec["file_size_bytes"] = matched.stat().st_size

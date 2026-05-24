@@ -18,6 +18,8 @@ from datetime import datetime
 from rich.console import Console
 from rich.panel import Panel
 from rich import box
+from backend.models.database import get_db_context
+from backend.models.models import Target, Scan
 
 console = Console()
 
@@ -230,9 +232,25 @@ def run_phase_screenshots(domain: str, scan_id: str, live_hosts: list):
 # ─────────────────────────────────────────────────────────────
 
 def run_scan(domain: str, mode: str):
-    scan_id = str(uuid.uuid4())
-    phases  = MODES[mode]["phases"]
-    start   = datetime.now()
+    scan_id   = str(uuid.uuid4())
+    target_id = str(uuid.uuid4())
+    phases    = MODES[mode]["phases"]
+    start     = datetime.now()
+
+    # Register target + scan in DB so FK constraints are satisfied
+    try:
+        with get_db_context() as db:
+            existing = db.query(Target).filter(Target.domain == domain).first()
+            if existing:
+                target_id = existing.id
+            else:
+                t = Target(id=target_id, domain=domain, status="active")
+                db.add(t)
+                db.flush()
+            scan = Scan(id=scan_id, target_id=target_id, scan_type=mode, status="running", start_time=start)
+            db.add(scan)
+    except Exception as e:
+        console.print(f"[yellow]⚠ DB registration skipped: {e}[/yellow]")
 
     console.rule(f"[bold cyan]Scanning: {domain}[/bold cyan]")
 
@@ -275,12 +293,29 @@ def run_scan(domain: str, mode: str):
     if "screenshots" in phases:
         run_phase_screenshots(domain, scan_id, live_hosts)
 
+    from backend.utils.file_storage import save_unified_report
+    from backend.utils.report_generator import generate_html_report
+    save_unified_report(domain, scan_data)
+    report_path = generate_html_report(domain, scan_id, scan_data)
+
     elapsed = (datetime.now() - start).seconds
+
+    # Mark scan complete in DB
+    try:
+        with get_db_context() as db:
+            scan = db.query(Scan).filter(Scan.id == scan_id).first()
+            if scan:
+                scan.status   = "completed"
+                scan.end_time = datetime.now()
+    except Exception:
+        pass
+
     console.print(
         f"\n[bold green]✅ Scan complete[/bold green] — "
         f"{domain} | {elapsed}s | Mode: {MODES[mode]['label']}"
     )
-    console.print(f"  [dim]Results in: data/ folder[/dim]\n")
+    console.print(f"  [dim]Results in: data/ folder[/dim]")
+    console.print(f"  [bold cyan]Visual Report: {report_path}[/bold cyan]\n")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -380,6 +415,11 @@ def main(target, mode, interval, force, status, no_banner):
     """
     if not no_banner:
         print_banner()
+
+    from backend.core.config import settings
+    if not settings.is_root:
+        console.print("[yellow]⚠  Running as non-root. Some nmap features (OS detection, UDP scan) will be disabled.[/yellow]")
+        console.print("[dim]   Run with 'sudo' for full capabilities.[/dim]\n")
 
     # Show scheduler status table
     if status:

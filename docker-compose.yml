@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  reconxp:
+    build: .
+    container_name: reconxp
+    volumes:
+      - ./data:/app/data
+    environment:
+      - RECON_DB_HOST=postgres
+      - RECON_DB_USER=postgres
+      - RECON_DB_PASSWORD=postgres
+      - RECON_REDIS_HOST=redis
+    depends_on:
+      - postgres
+      - redis
+    # The default command is "reconxp.py --help". Override this in 'docker run' to run a scan.
+
+  postgres:
+    image: postgres:15
+    container_name: reconxp-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=reconxploit
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7
+    container_name: reconxp-redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres_data:

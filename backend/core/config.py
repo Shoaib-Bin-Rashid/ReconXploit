@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     debug: bool = Field(default=False)
 
+    @property
+    def base_path(self) -> Path:
+        return BASE_DIR
+
     # Database
     db_host: str = Field(default=_yaml.get("database", {}).get("host", "localhost"))
     db_port: int = Field(default=_yaml.get("database", {}).get("port", 5432))
@@ -113,18 +117,27 @@ class Settings(BaseSettings):
         return BASE_DIR / self.temp_dir
 
     # Tool binaries (will use PATH if just a name)
-    tool_subfinder: str = Field(default="subfinder")
-    tool_assetfinder: str = Field(default="assetfinder")
-    tool_amass: str = Field(default="amass")
-    tool_findomain: str = Field(default="findomain")
-    tool_httpx: str = Field(default="httpx")
-    tool_gowitness: str = Field(default="gowitness")
-    tool_naabu: str = Field(default="naabu")
-    tool_nmap: str = Field(default="nmap")
-    tool_nuclei: str = Field(default="nuclei")
-    tool_waybackurls: str = Field(default="waybackurls")
-    tool_gau: str = Field(default="gau")
-    tool_dnsx: str = Field(default="dnsx")
+    tool_subfinder: str = Field(default=_yaml.get("tools", {}).get("subfinder", "subfinder"))
+    tool_assetfinder: str = Field(default=_yaml.get("tools", {}).get("assetfinder", "assetfinder"))
+    tool_amass: str = Field(default=_yaml.get("tools", {}).get("amass", "amass"))
+    tool_findomain: str = Field(default=_yaml.get("tools", {}).get("findomain", "findomain"))
+    tool_httpx: str = Field(default=_yaml.get("tools", {}).get("httpx", "/opt/homebrew/bin/httpx"))
+    tool_gowitness: str = Field(default=_yaml.get("tools", {}).get("gowitness", "gowitness"))
+    tool_naabu: str = Field(default=_yaml.get("tools", {}).get("naabu", "naabu"))
+    tool_nmap: str = Field(default=_yaml.get("tools", {}).get("nmap", "nmap"))
+    tool_nuclei: str = Field(default=_yaml.get("tools", {}).get("nuclei", "nuclei"))
+    tool_waybackurls: str = Field(default=_yaml.get("tools", {}).get("waybackurls", "waybackurls"))
+    tool_gau: str = Field(default=_yaml.get("tools", {}).get("gau", "gau"))
+    tool_dnsx: str = Field(default=_yaml.get("tools", {}).get("dnsx", "dnsx"))
+
+    @property
+    def is_root(self) -> bool:
+        """Check if current process has root/superuser privileges."""
+        try:
+            return os.getuid() == 0
+        except AttributeError:
+            # os.getuid() doesn't exist on Windows
+            return False
 
     class Config:
         env_prefix = "RECON_"
